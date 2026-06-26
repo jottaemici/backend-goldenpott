@@ -31,7 +31,7 @@ app.post('/gerarPix', async (req, res) => {
     const { amount, cpf, name, playerId } = req.body;
 
     try {
-        const respostaMP = await axios.post('[https://api.mercadopago.com/v1/payments](https://api.mercadopago.com/v1/payments)', {
+        const respostaMP = await axios.post('https://api.mercadopago.com/v1/payments', {
             transaction_amount: Number(amount),
             payment_method_id: 'pix',
             description: 'Depósito Golden Pott',
