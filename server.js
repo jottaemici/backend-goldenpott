@@ -1,31 +1,31 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const admin = require('firebase-admin');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 require('dotenv').config();
 
 const app = express();
-app.use(cors()); // Permite que o seu site comunique com este servidor
+app.use(cors()); 
 app.use(express.json());
 
-// 1. Iniciar o Firebase com as Variáveis de Ambiente Seguras
+// 1. Iniciar o Firebase com a nova sintaxe
 const serviceAccount = {
     projectId: process.env.FIREBASE_PROJECT_ID,
     clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    // O Render substitui "\\n" por quebras de linha reais
     privateKey: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined
 };
 
-admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+initializeApp({
+    credential: cert(serviceAccount)
 });
-const db = admin.firestore();
+const db = getFirestore();
 
-// 2. Token do Mercado Pago (Seguro no Render)
+// 2. Token do Mercado Pago
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 
 // ==========================================
-// ROTA 1: GERAR PIX (Chamada pelo seu Jogo)
+// ROTA 1: GERAR PIX
 // ==========================================
 app.post('/gerarPix', async (req, res) => {
     const { amount, cpf, name, playerId } = req.body;
@@ -49,7 +49,6 @@ app.post('/gerarPix', async (req, res) => {
 
         const pagamento = respostaMP.data;
 
-        // Guarda transação como pendente na Base de Dados
         await db.collection('artifacts').doc('pote-de-ouro-v1')
             .collection('public').doc('data')
             .collection('transactions').doc(pagamento.id.toString()).set({
@@ -62,7 +61,6 @@ app.post('/gerarPix', async (req, res) => {
                 timestamp: Date.now()
             });
 
-        // Envia QR Code para o site
         res.status(200).json({
             paymentId: pagamento.id,
             qrCodeBase64: pagamento.point_of_interaction.transaction_data.qr_code_base64,
@@ -76,7 +74,7 @@ app.post('/gerarPix', async (req, res) => {
 });
 
 // ==========================================
-// ROTA 2: WEBHOOK (Aviso do Mercado Pago)
+// ROTA 2: WEBHOOK
 // ==========================================
 app.post('/webhook', async (req, res) => {
     const paymentId = req.query.id || req.body.data?.id;
@@ -84,7 +82,6 @@ app.post('/webhook', async (req, res) => {
 
     if (topic === 'payment' && paymentId) {
         try {
-            // Pergunta ao Mercado Pago se foi mesmo pago (Anti-Fraude)
             const verificarPagamento = await axios.get(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
                 headers: { 'Authorization': `Bearer ${MP_ACCESS_TOKEN}` }
             });
@@ -102,18 +99,15 @@ app.post('/webhook', async (req, res) => {
                     const txData = txSnap.data();
                     const batch = db.batch();
 
-                    // 1. Marca como aprovado
                     batch.update(txRef, { status: 'approved' });
 
-                    // 2. Dá o saldo ao jogador
                     const refJogador = db.collection('artifacts').doc('pote-de-ouro-v1')
                         .collection('public').doc('data')
                         .collection('players').doc(txData.playerNameUpper);
                     
-                    batch.update(refJogador, { balance: admin.firestore.FieldValue.increment(txData.amount) });
+                    batch.update(refJogador, { balance: FieldValue.increment(txData.amount) });
 
                     await batch.commit();
-                    console.log(`Pagamento ${paymentId} creditado com sucesso!`);
                 }
             }
             res.status(200).send('OK');
@@ -126,7 +120,6 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
-// Inicia o servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Servidor a correr na porta ${PORT}`);
